@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
 from typing import List, Optional, Tuple
 
@@ -24,6 +25,9 @@ app = FastAPI(title="Semantic Table Search API")
 
 @app.on_event("startup")
 def startup_event():
+    """
+    Initialize the ChromaDB client, embedding function, collections and llm chains.
+    """
     # Initialize ChromaDB
     app.state.client = chromadb.PersistentClient(path=os.getenv("CHROMA_DIR"))
 
@@ -37,27 +41,16 @@ def startup_event():
     app.state.domain_collection = app.state.client.get_or_create_collection(name="dataset_domains", embedding_function=app.state.ef)
     
     # Initialize LLM and chains
-    app.state.llm = ChatOllama(model=os.getenv("OLLAMA_MODEL"), temperature=0, max_tokens=None, base_url=os.getenv("OLLAMA_URL"))
+    if os.getenv("LLM_OPTION") == "ollama":
+        app.state.llm = ChatOllama(model=os.getenv("OLLAMA_MODEL"), temperature=0, max_tokens=None, base_url=os.getenv("OLLAMA_URL"))
+    elif os.getenv("LLM_OPTION") == "groq":
+        app.state.llm = ChatGroq(model=os.getenv("GROQ_MODEL"), temperature=0, max_tokens=None, base_url=os.getenv("GROQ_URL"))
     dataset_description_prompt = ChatPromptTemplate.from_template(DATASET_DESCRIPTION_PROMPT_TEMPLATE)
     app.state.dataset_description_chain = dataset_description_prompt | app.state.llm.with_structured_output(DatasetDescription)
     
     candidate_dataset_description_inference_prompt = ChatPromptTemplate.from_template(CANDIDATE_DATASET_DESCRIPTION_INFERENCE_PROMPT_TEMPLATE)
     app.state.candidate_dataset_description_chain = candidate_dataset_description_inference_prompt | app.state.llm.with_structured_output(DatasetDescription)
     
-
-# class SetupRequest(BaseModel):
-#     chroma_dir: str = Field(default="./chroma_storage", description="The directory to store the ChromaDB database.")
-#     collection_names: List[str] = Field(default=['dataset_descriptions', 'dataset_use_cases', 'dataset_domains'], description="The names of the collections to create. Should be a list of three strings.")
-#     ollama_url: str = Field(default="http://localhost:11434", description="The URL of the Ollama server that will be used to embed the data can be accessed.")
-#     ollama_embedding_model: str = Field(default="nomic-embed-text", description="The model to use for embedding. Should be a string.")
-
-# @app.post("/setup_sds")
-# def setup_sds(request: SetupRequest):
-#     try:
-#         setup_chroma_db_infrastructure(request.chroma_dir, request.collection_names, request.ollama_url, request.ollama_embedding_model)
-#         return {"status": "success", "message": "Semantic table search setup completed"}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 class AddDatasetRequest(BaseModel):
     dataset_id: str
@@ -67,45 +60,156 @@ class AddDatasetRequest(BaseModel):
 
 @app.post("/add_dataset")
 def add_dataset(request: AddDatasetRequest):
+    """
+    Add a dataset to the ChromaDB database collections.
+    """
+    dataset_id = request.dataset_id
+    try: 
+        if request.dataset_official_description is None:
+            official_description = ""
+        else:
+            official_description = str(request.dataset_official_description)
+
+        if request.dataset_profile_description is None:
+            profile_description = ""
+        else:
+            profile_description = str(request.dataset_profile_description)
+
+        total_description = str("Official Description: " + str(official_description) + "\n" + "Profile Description extracted from the tool: " + str(profile_description))
+        
+        # Extract full descriptions
+        dataset_description = app.state.dataset_description_chain.invoke({"column_descriptions": total_description})
+
+        general_description = dataset_description.general_description
+        purpose = dataset_description.purpose
+        domain = dataset_description.domain
+
+        # Ingest descriptions
+        app.state.description_collection.add(
+            documents=[general_description],
+            metadatas=[{"dataset_id": dataset_id}],
+            ids=[dataset_id]
+        )
+        app.state.use_case_collection.add(
+            documents=[purpose],
+            metadatas=[{"dataset_id": dataset_id}],
+            ids=[dataset_id]
+        )
+        app.state.domain_collection.add(
+            documents=[domain],
+            metadatas=[{"dataset_id": dataset_id}],
+            ids=[dataset_id]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "success", "message": "Dataset ingested successfully"}
+
+
+class DeleteDatasetRequest(BaseModel):
+    dataset_id: str
+
+@app.delete("/delete_dataset")
+def delete_dataset(request: DeleteDatasetRequest):
+    """
+    Delete a dataset from the ChromaDB database collections.
+    """
+    dataset_id = request.dataset_id
+    try:
+        app.state.description_collection.delete(ids=[dataset_id])
+        app.state.use_case_collection.delete(ids=[dataset_id])
+        app.state.domain_collection.delete(ids=[dataset_id])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "success", "message": "Dataset deleted successfully"}
+
+class UpdateDatasetRequest(BaseModel):
+    dataset_id: str
+    dataset_official_description: str
+    dataset_profile_description: str
+    dataset_domain: str
+    dataset_metadata: Dict[str, Any]
+    
+@app.put("/update_dataset")
+def update_dataset(request: UpdateDatasetRequest):
+    """
+    Update a dataset in the ChromaDB database collections.
+    """
     dataset_id = request.dataset_id
 
-    if request.dataset_official_description is None:
-        official_description = ""
-    else:
-        official_description = str(request.dataset_official_description)
+    try: 
+        if request.dataset_official_description is None:
+            official_description = ""
+        else:
+            official_description = str(request.dataset_official_description)
 
-    if request.dataset_profile_description is None:
-        profile_description = ""
-    else:
-        profile_description = str(request.dataset_profile_description)
+        if request.dataset_profile_description is None:
+            profile_description = ""
+        else:
+            profile_description = str(request.dataset_profile_description)
 
-    total_description = str("Official Description: " + str(official_description) + "\n" + "Profile Description extracted from the tool: " + str(profile_description))
-    
-    # Extract full descriptions
-    dataset_description = app.state.dataset_description_chain.invoke({"column_descriptions": total_description})
+        total_description = str("Official Description: " + str(official_description) + "\n" + "Profile Description extracted from the tool: " + str(profile_description))
+        
+        # Extract full descriptions
+        dataset_description = app.state.dataset_description_chain.invoke({"column_descriptions": total_description})
 
-    general_description = dataset_description.general_description
-    purpose = dataset_description.purpose
-    domain = dataset_description.domain
+        general_description = dataset_description.general_description
+        purpose = dataset_description.purpose
+        domain = dataset_description.domain
 
-    # Ingest descriptions
-    app.state.description_collection.add(
-        documents=[general_description],
-        metadatas=[{"dataset_id": dataset_id}],
-        ids=[dataset_id]
-    )
-    app.state.use_case_collection.add(
-        documents=[purpose],
-        metadatas=[{"dataset_id": dataset_id}],
-        ids=[dataset_id]
-    )
-    app.state.domain_collection.add(
-        documents=[domain],
-        metadatas=[{"dataset_id": dataset_id}],
-        ids=[dataset_id]
-    )
+        # Ingest descriptions
+        if request.dataset_metadata is not None:
+            app.state.description_collection.update(
+                documents=[general_description],
+                metadatas=[request.dataset_metadata],
+                ids=[dataset_id]
+            )
+            app.state.use_case_collection.update(
+                documents=[purpose],
+                metadatas=[request.dataset_metadata],
+                ids=[dataset_id]
+            )
+            app.state.domain_collection.update(
+                documents=[domain],
+                metadatas=[request.dataset_metadata],
+                ids=[dataset_id]
+            )
+        else:
+            app.state.description_collection.update(
+                documents=[general_description],
+                ids=[dataset_id]
+            )
+            app.state.use_case_collection.update(
+                documents=[purpose],
+                ids=[dataset_id]
+            )
+            app.state.domain_collection.update(
+                documents=[domain],
+                ids=[dataset_id]
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    return {"status": "success", "message": "Dataset ingested successfully"}
+    return {"status": "success", "message": "Dataset updated successfully"}
+
+class UpdateDatasetMetadataRequest(BaseModel):
+    dataset_id: str
+    dataset_metadata: Dict[str, Any]
+
+@app.put("/update_dataset_metadata")
+def update_dataset_metadata(request: UpdateDatasetMetadataRequest):
+    """
+    Update the metadata of a dataset in the ChromaDB database collections.
+    """
+    try:    
+        dataset_id = request.dataset_id
+        existing_metadata = app.state.description_collection.get(ids=[dataset_id])['metadatas'][0]
+        new_metadata = {**existing_metadata, **request.dataset_metadata}
+        app.state.description_collection.update(ids=[dataset_id], metadatas=[new_metadata])
+        app.state.use_case_collection.update(ids=[dataset_id], metadatas=[new_metadata])
+        app.state.domain_collection.update(ids=[dataset_id], metadatas=[new_metadata])    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "success", "message": "Dataset metadata updated successfully"}
 
 class SearchDatasetsRequest(BaseModel):
     query: str

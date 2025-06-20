@@ -4,10 +4,12 @@ A FastAPI-based service that enables semantic search capabilities for tabular da
 
 ## Features
 
-- Add datasets with descriptions and metadata
+- Add, update, and delete datasets with descriptions and metadata
 - Semantic search across datasets using natural language queries
 - Vector-based similarity search using embeddings
 - Support for both basic and expanded search results
+- Multi-collection storage (descriptions, use cases, domains)
+- LLM-powered dataset description extraction and classification
 
 ## Prerequisites
 
@@ -44,7 +46,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 3. Install the required packages:
 ```bash
-pip install fastapi uvicorn langchain-ollama chromadb python-dotenv pydantic
+pip install -r requirements.txt
 ```
 
 ### Running Locally
@@ -93,6 +95,39 @@ POST /add_dataset
 }
 ```
 
+### Update Dataset
+```bash
+PUT /update_dataset
+{
+    "dataset_id": "unique_id",
+    "dataset_official_description": "Updated official description",
+    "dataset_profile_description": "Updated profile description",
+    "dataset_domain": "domain",
+    "dataset_metadata": {
+        "key": "value"
+    }
+}
+```
+
+### Update Dataset Metadata
+```bash
+PUT /update_dataset_metadata
+{
+    "dataset_id": "unique_id",
+    "dataset_metadata": {
+        "key": "value"
+    }
+}
+```
+
+### Delete Dataset
+```bash
+DELETE /delete_dataset
+{
+    "dataset_id": "unique_id"
+}
+```
+
 ### Search Datasets
 ```bash
 POST /search_datasets
@@ -124,12 +159,27 @@ The project structure:
 ├── server.py           # Main FastAPI application
 ├── models.py           # Pydantic models
 ├── prompts.py          # LLM prompt templates
-└── notebooks/          # Test and development notebooks
+├── requirements.txt    # Python dependencies
+├── Dockerfile         # Docker configuration
+├── .env              # Environment variables (create this)
+├── .gitignore        # Git ignore rules
+├── LICENSE           # Project license
+└── notebooks/        # Test and development notebooks
 ```
+
+## Architecture
+
+The service uses three ChromaDB collections for different aspects of dataset information:
+- **dataset_descriptions**: General descriptions of datasets
+- **dataset_use_cases**: Purpose and use case information
+- **dataset_domains**: Domain classification
+
+Each dataset is processed through LLM chains to extract structured information from raw descriptions.
 
 ## Notes
 
 - The service requires Ollama to be running and accessible
 - ChromaDB data is persisted in the directory specified by `CHROMA_DIR`
 - When running with Docker, make sure Ollama is accessible from the container
-- The default port is 8000, but can be changed by modifying the uvicorn command 
+- The default port is 8000, but can be changed by modifying the uvicorn command
+- The service automatically creates ChromaDB collections on startup 

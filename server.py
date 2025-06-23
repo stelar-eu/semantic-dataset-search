@@ -214,6 +214,7 @@ def update_dataset_metadata(request: UpdateDatasetMetadataRequest):
 class SearchDatasetsRequest(BaseModel):
     query: str
     n_results: int = 5
+    auth_scope: List[str] = []
 
 @app.post("/search_datasets")
 def search_datasets(request: SearchDatasetsRequest):
@@ -237,7 +238,8 @@ def search_datasets(request: SearchDatasetsRequest):
         if general_description:
             general_description_results = app.state.description_collection.query(
                 query_texts=[general_description],
-                n_results=2*request.n_results
+                n_results=2*request.n_results,
+                where={"auth_scope": {"$in": request.auth_scope}}
             )
             general_description_results_dict = { k: v for k, v in zip(general_description_results['ids'][0], general_description_results['distances'][0]) }
             max_general_description_distance = max(general_description_results['distances'][0])
@@ -246,7 +248,8 @@ def search_datasets(request: SearchDatasetsRequest):
         if purpose:
             purpose_results = app.state.use_case_collection.query(
                 query_texts=[purpose],
-                n_results=2*request.n_results
+                n_results=2*request.n_results, 
+                where={"auth_scope": {"$in": request.auth_scope}}
             )
             purpose_results_dict = { k: v for k, v in zip(purpose_results['ids'][0], purpose_results['distances'][0]) }
             max_purpose_distance = max(purpose_results['distances'][0])
@@ -255,7 +258,8 @@ def search_datasets(request: SearchDatasetsRequest):
         if domain:
             domain_results = app.state.domain_collection.query(
                 query_texts=[domain],
-                n_results=2*request.n_results
+                n_results=2*request.n_results,
+                where={"auth_scope": {"$in": request.auth_scope}}
             )
             domain_results_dict = { k: v for k, v in zip(domain_results['ids'][0], domain_results['distances'][0]) }
             max_domain_distance = max(domain_results['distances'][0])
@@ -311,7 +315,8 @@ def search_datasets_expanded(request: SearchDatasetsRequest):
         if general_description:
             general_description_results = app.state.description_collection.query(
                 query_texts=[general_description],
-                n_results=2*request.n_results
+                n_results=2*request.n_results,
+                where={"auth_scope": {"$in": request.auth_scope}}
             )
             general_description_results_dict = { k: v for k, v in zip(general_description_results['ids'][0], general_description_results['distances'][0]) }
             max_general_description_distance = max(general_description_results['distances'][0])
@@ -320,7 +325,8 @@ def search_datasets_expanded(request: SearchDatasetsRequest):
         if purpose:
             purpose_results = app.state.use_case_collection.query(
                 query_texts=[purpose],
-                n_results=2*request.n_results
+                n_results=2*request.n_results,
+                where={"auth_scope": {"$in": request.auth_scope}}
             )
             purpose_results_dict = { k: v for k, v in zip(purpose_results['ids'][0], purpose_results['distances'][0]) }
             max_purpose_distance = max(purpose_results['distances'][0])
@@ -329,7 +335,8 @@ def search_datasets_expanded(request: SearchDatasetsRequest):
         if domain:
             domain_results = app.state.domain_collection.query(
                 query_texts=[domain],
-                n_results=2*request.n_results
+                n_results=2*request.n_results,
+                where={"auth_scope": {"$in": request.auth_scope}}
             )
             domain_results_dict = { k: v for k, v in zip(domain_results['ids'][0], domain_results['distances'][0]) }
             max_domain_distance = max(domain_results['distances'][0])

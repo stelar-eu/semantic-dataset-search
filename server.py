@@ -85,19 +85,30 @@ def add_dataset(request: AddDatasetRequest):
         domain = dataset_description.domain
 
         # Ingest descriptions
+        metadata = {"dataset_id": dataset_id}
+        if request.dataset_metadata:
+            # Convert any list values to JSON strings for ChromaDB compatibility
+            processed_metadata = {}
+            for key, value in request.dataset_metadata.items():
+                if isinstance(value, list):
+                    processed_metadata[key] = json.dumps(value)
+                else:
+                    processed_metadata[key] = value
+            metadata.update(processed_metadata)
+            
         app.state.description_collection.add(
             documents=[general_description],
-            metadatas=[{"dataset_id": dataset_id}],
+            metadatas=[metadata],
             ids=[dataset_id]
         )
         app.state.use_case_collection.add(
             documents=[purpose],
-            metadatas=[{"dataset_id": dataset_id}],
+            metadatas=[metadata],
             ids=[dataset_id]
         )
         app.state.domain_collection.add(
             documents=[domain],
-            metadatas=[{"dataset_id": dataset_id}],
+            metadatas=[metadata],
             ids=[dataset_id]
         )
     except Exception as e:
@@ -158,19 +169,27 @@ def update_dataset(request: UpdateDatasetRequest):
 
         # Ingest descriptions
         if request.dataset_metadata is not None:
+            # Convert any list values to JSON strings for ChromaDB compatibility
+            processed_metadata = {}
+            for key, value in request.dataset_metadata.items():
+                if isinstance(value, list):
+                    processed_metadata[key] = json.dumps(value)
+                else:
+                    processed_metadata[key] = value
+            
             app.state.description_collection.update(
                 documents=[general_description],
-                metadatas=[request.dataset_metadata],
+                metadatas=[processed_metadata],
                 ids=[dataset_id]
             )
             app.state.use_case_collection.update(
                 documents=[purpose],
-                metadatas=[request.dataset_metadata],
+                metadatas=[processed_metadata],
                 ids=[dataset_id]
             )
             app.state.domain_collection.update(
                 documents=[domain],
-                metadatas=[request.dataset_metadata],
+                metadatas=[processed_metadata],
                 ids=[dataset_id]
             )
         else:
@@ -235,36 +254,62 @@ def search_datasets(request: SearchDatasetsRequest):
         purpose = candidate_dataset_description.purpose
         domain = candidate_dataset_description.domain
 
+        general_description_results = None
+        purpose_results = None
+        domain_results = None
+        general_description_results_dict = {}
+        purpose_results_dict = {}
+        domain_results_dict = {}
+        max_general_description_distance = 0
+        max_purpose_distance = 0
+        max_domain_distance = 0
+
+        print(request.auth_scope)
+
         if general_description:
             general_description_results = app.state.description_collection.query(
                 query_texts=[general_description],
                 n_results=2*request.n_results,
-                where={"auth_scope": {"$in": request.auth_scope}}
+                where={"auth_scope": {"$in": [json.dumps(request.auth_scope)]}}
             )
-            general_description_results_dict = { k: v for k, v in zip(general_description_results['ids'][0], general_description_results['distances'][0]) }
-            max_general_description_distance = max(general_description_results['distances'][0])
+            if general_description_results['ids'][0]:  # Check if results are not empty
+                general_description_results_dict = { k: v for k, v in zip(general_description_results['ids'][0], general_description_results['distances'][0]) }
+                max_general_description_distance = max(general_description_results['distances'][0])
         
         # Search for the purpose
         if purpose:
             purpose_results = app.state.use_case_collection.query(
                 query_texts=[purpose],
                 n_results=2*request.n_results, 
-                where={"auth_scope": {"$in": request.auth_scope}}
+                where={"auth_scope": {"$in": [json.dumps(request.auth_scope)]}}
             )
-            purpose_results_dict = { k: v for k, v in zip(purpose_results['ids'][0], purpose_results['distances'][0]) }
-            max_purpose_distance = max(purpose_results['distances'][0])
+            if purpose_results['ids'][0]:  # Check if results are not empty
+                purpose_results_dict = { k: v for k, v in zip(purpose_results['ids'][0], purpose_results['distances'][0]) }
+                max_purpose_distance = max(purpose_results['distances'][0])
         
         # Search for the domain
         if domain:
             domain_results = app.state.domain_collection.query(
                 query_texts=[domain],
                 n_results=2*request.n_results,
-                where={"auth_scope": {"$in": request.auth_scope}}
+                where={"auth_scope": {"$in": [json.dumps(request.auth_scope)]}}
             )
-            domain_results_dict = { k: v for k, v in zip(domain_results['ids'][0], domain_results['distances'][0]) }
-            max_domain_distance = max(domain_results['distances'][0])
+            if domain_results['ids'][0]:  # Check if results are not empty
+                domain_results_dict = { k: v for k, v in zip(domain_results['ids'][0], domain_results['distances'][0]) }
+                max_domain_distance = max(domain_results['distances'][0])
         
-        candidate_datasets = general_description_results['ids'][0] + purpose_results['ids'][0] + domain_results['ids'][0]
+        # Collect all candidate datasets
+        candidate_datasets = []
+        if general_description_results and general_description_results['ids'][0]:
+            candidate_datasets.extend(general_description_results['ids'][0])
+        if purpose_results and purpose_results['ids'][0]:
+            candidate_datasets.extend(purpose_results['ids'][0])
+        if domain_results and domain_results['ids'][0]:
+            candidate_datasets.extend(domain_results['ids'][0])
+        
+        if not candidate_datasets:
+            return []
+        
         candidate_datasets_distances = { k: 0 for k in candidate_datasets }
         for dataset in candidate_datasets:
             if general_description: 
@@ -286,7 +331,7 @@ def search_datasets(request: SearchDatasetsRequest):
         # sort the candidate datasets by the distances
         sorted_candidate_datasets_distances = sorted(candidate_datasets_distances.items(), key=lambda x: x[1])
 
-        # return the top 3 candidate datasets
+        # return the top candidate datasets
         return sorted_candidate_datasets_distances[:request.n_results]
     
     except Exception as e:
@@ -312,34 +357,47 @@ def search_datasets_expanded(request: SearchDatasetsRequest):
         purpose = candidate_dataset_description.purpose
         domain = candidate_dataset_description.domain
 
+        general_description_results = None
+        purpose_results = None
+        domain_results = None
+        general_description_results_dict = {}
+        purpose_results_dict = {}
+        domain_results_dict = {}
+        max_general_description_distance = 0
+        max_purpose_distance = 0
+        max_domain_distance = 0
+
         if general_description:
             general_description_results = app.state.description_collection.query(
                 query_texts=[general_description],
                 n_results=2*request.n_results,
-                where={"auth_scope": {"$in": request.auth_scope}}
+                where={"auth_scope": {"$in": [json.dumps(request.auth_scope)]}}
             )
-            general_description_results_dict = { k: v for k, v in zip(general_description_results['ids'][0], general_description_results['distances'][0]) }
-            max_general_description_distance = max(general_description_results['distances'][0])
+            if general_description_results['ids'][0]:  # Check if results are not empty
+                general_description_results_dict = { k: v for k, v in zip(general_description_results['ids'][0], general_description_results['distances'][0]) }
+                max_general_description_distance = max(general_description_results['distances'][0])
         
         # Search for the purpose
         if purpose:
             purpose_results = app.state.use_case_collection.query(
                 query_texts=[purpose],
                 n_results=2*request.n_results,
-                where={"auth_scope": {"$in": request.auth_scope}}
+                where={"auth_scope": {"$in": [json.dumps(request.auth_scope)]}}
             )
-            purpose_results_dict = { k: v for k, v in zip(purpose_results['ids'][0], purpose_results['distances'][0]) }
-            max_purpose_distance = max(purpose_results['distances'][0])
+            if purpose_results['ids'][0]:  # Check if results are not empty
+                purpose_results_dict = { k: v for k, v in zip(purpose_results['ids'][0], purpose_results['distances'][0]) }
+                max_purpose_distance = max(purpose_results['distances'][0])
         
         # Search for the domain
         if domain:
             domain_results = app.state.domain_collection.query(
                 query_texts=[domain],
                 n_results=2*request.n_results,
-                where={"auth_scope": {"$in": request.auth_scope}}
+                where={"auth_scope": {"$in": [json.dumps(request.auth_scope)]}}
             )
-            domain_results_dict = { k: v for k, v in zip(domain_results['ids'][0], domain_results['distances'][0]) }
-            max_domain_distance = max(domain_results['distances'][0])
+            if domain_results['ids'][0]:  # Check if results are not empty
+                domain_results_dict = { k: v for k, v in zip(domain_results['ids'][0], domain_results['distances'][0]) }
+                max_domain_distance = max(domain_results['distances'][0])
         
         candidate_datasets = general_description_results['ids'][0] + purpose_results['ids'][0] + domain_results['ids'][0]
         candidate_datasets_distances = { k: 0 for k in candidate_datasets }

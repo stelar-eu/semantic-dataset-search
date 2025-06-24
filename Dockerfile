@@ -18,6 +18,9 @@ RUN pip install -r requirements.txt
 # Copy the application
 COPY . .
 
+# Copy the .env file
+COPY .env .
+
 # Expose the port the app runs on
 EXPOSE 8000
 

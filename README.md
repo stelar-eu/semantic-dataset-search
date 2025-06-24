@@ -90,7 +90,7 @@ The API will be available at `http://localhost:8000`
 
 1. Build the Docker image:
 ```bash
-docker build -t semantic-table-search .
+docker build -t semantic-dataset-search .
 ```
 
 2. Run the container:
@@ -100,7 +100,7 @@ docker run -p 8000:8000 \
   -e OLLAMA_EMBEDDING_MODEL=nomic-embed-text \
   -e OLLAMA_MODEL=llama2 \
   -e CHROMA_DIR=/app/chroma_storage \
-  semantic-table-search
+  semantic-dataset-search
 ```
 
 ## API Endpoints

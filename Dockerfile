@@ -7,18 +7,21 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
 
-# Install Python dependencies
-RUN pip install -r requirements.txt
+# Copy dependency files first to leverage Docker cache
+COPY pyproject.toml uv.lock ./
+
+# Install Python dependencies using uv
+RUN uv sync --frozen
 
 # Copy the application files
-COPY models.py .
-COPY prompts.py .
-COPY server.py .
+COPY src/ ./src/
 
 # Remove any env files 
 RUN find . -name "*.env*" -type f -delete
@@ -30,4 +33,4 @@ RUN find . -name "*.env*" -type f -delete
 EXPOSE 8000
 
 # Command to run the application
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"] 
+CMD ["uv", "run", "uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000"] 

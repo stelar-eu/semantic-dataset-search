@@ -1,29 +1,45 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+import json
+import os
+from contextlib import asynccontextmanager
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama
-from langchain_groq import ChatGroq
-
-from pydantic import BaseModel
-from typing import List
 import chromadb
+import uvicorn
 from chromadb.utils.embedding_functions import (
     OllamaEmbeddingFunction,
     SentenceTransformerEmbeddingFunction,
 )
-from prompts import (
-    DATASET_DESCRIPTION_PROMPT_TEMPLATE,
-    CANDIDATE_DATASET_DESCRIPTION_INFERENCE_PROMPT_TEMPLATE,
-)
-from models import DatasetDescription
-import json
-import uvicorn
 from dotenv import load_dotenv
-import os
-from contextlib import asynccontextmanager
+from fastapi import BackgroundTasks, FastAPI, HTTPException, status
+from fastapi.responses import JSONResponse, StreamingResponse
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
+
+from .models import (
+    AddDatasetRequest,
+    DatasetDescription,
+    DeleteDatasetRequest,
+    SearchDatasetsRequest,
+    UpdateDatasetMetadataRequest,
+    UpdateDatasetRequest,
+)
+from .prompts import (
+    CANDIDATE_DATASET_DESCRIPTION_INFERENCE_PROMPT_TEMPLATE,
+    DATASET_DESCRIPTION_PROMPT_TEMPLATE,
+)
+from .utils import flatten_auth_scope
+
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Set logger to handle info, warnings, and errors
+logger.setLevel(logging.INFO)
 
 # Only load environment variables from .env file outside of production mode
 # Otherwise the environment variables should be set during the deployment
@@ -116,46 +132,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Semantic Dataset Search API", lifespan=lifespan)
 
-
-def flatten_auth_scope(scopes):
-    """
-    Flatten the auth_scope list into a dictionary for ChromaDB query.
-    If no scopes are provided, default to public datasets. This is mainly
-    used when searching for datasets.
-
-    Example:
-        flatten_auth_scope(["public", "org-a"])
-        returns {"auth_scope_public": {"$eq": True}, "auth_scope_org-a": {"$eq": True}}
-
-        flatten_auth_scope([])
-        returns {"auth_scope_public": {"$eq": True}}
-    """
-
-    if not scopes:
-        # Default filtering is show only public datasets
-        where_scope = {"auth_scope_public": {"$eq": True}}
-    elif len(scopes) == 1:
-        # Use simple equality
-        where_scope = {f"auth_scope_{scopes[0]}": {"$eq": True}}
-    else:
-        # Use $or for multiple scopes
-        where_scope = {"$or": [{f"auth_scope_{s}": {"$eq": True}} for s in scopes]}
-    return where_scope
-
-
 @app.get("/")
 def get_root():
     """
     Root endpoint to check if the API is running.
     """
     return {"status": "running", "message": "Semantic Dataset Search API is running"}
-
-
-class AddDatasetRequest(BaseModel):
-    dataset_id: str
-    dataset_official_description: str
-    dataset_profile_description: str
-    dataset_metadata: Dict[str, Any]
 
 
 def _ingest_dataset(request: AddDatasetRequest) -> None:
@@ -236,11 +218,6 @@ async def add_dataset(
         },
     )
 
-
-class DeleteDatasetRequest(BaseModel):
-    dataset_id: str
-
-
 @app.delete("/delete_dataset")
 def delete_dataset(request: DeleteDatasetRequest):
     """
@@ -254,14 +231,6 @@ def delete_dataset(request: DeleteDatasetRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"status": "success", "message": "Dataset deleted successfully"}
-
-
-class UpdateDatasetRequest(BaseModel):
-    dataset_id: str
-    dataset_official_description: str
-    dataset_profile_description: str
-    dataset_metadata: Dict[str, Any]
-
 
 @app.put("/update_dataset")
 def update_dataset(request: UpdateDatasetRequest):
@@ -331,11 +300,6 @@ def update_dataset(request: UpdateDatasetRequest):
     return {"status": "success", "message": "Dataset updated successfully"}
 
 
-class UpdateDatasetMetadataRequest(BaseModel):
-    dataset_id: str
-    dataset_metadata: Dict[str, Any]
-
-
 @app.put("/update_dataset_metadata")
 def update_dataset_metadata(request: UpdateDatasetMetadataRequest):
     """
@@ -357,12 +321,6 @@ def update_dataset_metadata(request: UpdateDatasetMetadataRequest):
     return {"status": "success", "message": "Dataset metadata updated successfully"}
 
 
-class SearchDatasetsRequest(BaseModel):
-    query: str
-    n_results: int = 5
-    auth_scope: List[str] = []
-
-
 @app.post("/search_datasets")
 def search_datasets(request: SearchDatasetsRequest):
     """
@@ -382,6 +340,7 @@ def search_datasets(request: SearchDatasetsRequest):
                 {"query": request.query}
             )
         )
+        logger.info(f"Candidate dataset description: {candidate_dataset_description}")
         general_description = candidate_dataset_description.general_description
         purpose = candidate_dataset_description.purpose
         domain = candidate_dataset_description.domain
@@ -493,10 +452,6 @@ def search_datasets(request: SearchDatasetsRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-from fastapi.responses import StreamingResponse
-import json
 
 
 @app.post("/search_datasets_streaming")

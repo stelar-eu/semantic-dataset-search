@@ -15,11 +15,16 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install -r requirements.txt
 
-# Copy the application
-COPY . .
+# Copy the application files
+COPY models.py .
+COPY prompts.py .
+COPY server.py .
+
+# Remove any env files 
+RUN find . -name "*.env*" -type f -delete
 
 # Copy the .env file
-COPY .env .
+# COPY .env .
 
 # Expose the port the app runs on
 EXPOSE 8000

@@ -3,17 +3,18 @@ name = "semantic-dataset-search"
 version = "0.1.0"
 description = "A solution to perform semantic search on dataset catalogues"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "chromadb==1.0.9",
     "elastic-transport==8.17.1",
     "elasticsearch==9.0.1",
     "fastapi==0.115.9",
     "httpx==0.28.1",
-    "langchain-core==0.3.49",
-    "langchain-groq==0.3.0",
-    "langchain-ollama==0.3.0",
+    "langchain>=1.0.2",
+    "langchain-core>=1.0.0",
+    "langchain-groq>=1.0.0",
     "numpy==2.2.4",
+    "ollama>=0.6.0",
     "pandas==2.2.3",
     "pydantic==2.11.1",
     "python-dotenv==1.1.0",

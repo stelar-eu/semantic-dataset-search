@@ -12,8 +12,7 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_groq import ChatGroq
-from langchain_ollama import ChatOllama
+from langchain.chat_models import init_chat_model
 
 from .models import (
     AddDatasetRequest,
@@ -91,22 +90,14 @@ async def lifespan(app: FastAPI):
     app.state.domain_collection = app.state.client.get_or_create_collection(
         name="dataset_domains", embedding_function=app.state.ef
     )
-
-    # Initialize LLM and chains
-    if os.getenv("LLM_OPTION") == "ollama":
-        app.state.llm = ChatOllama(
-            model=os.getenv("OLLAMA_MODEL"),
-            temperature=0,
-            max_tokens=None,
-            base_url=os.getenv("OLLAMA_URL"),
-        )
-    elif os.getenv("LLM_OPTION") == "groq":
-        app.state.llm = ChatGroq(
-            model=os.getenv("GROQ_MODEL"),
-            temperature=0,
-            max_tokens=None,
-            base_url=os.getenv("GROQ_URL"),
-        )
+    # Initialize LLM 
+    app.state.llm = init_chat_model(
+        model=os.getenv("LLM_MODEL"),
+        model_provider=os.getenv("LLM_PROVIDER"),
+        temperature=0,
+        max_tokens=None
+    )
+    
     dataset_description_prompt = ChatPromptTemplate.from_template(
         DATASET_DESCRIPTION_PROMPT_TEMPLATE
     )

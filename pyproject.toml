@@ -24,3 +24,9 @@ dependencies = [
     "typing-extensions==4.12.2",
     "uvicorn==0.34.2",
 ]
+
+[dependency-groups]
+front-end = [
+    "requests>=2.32.5",
+    "streamlit>=1.50.0",
+]

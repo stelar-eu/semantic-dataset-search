@@ -159,7 +159,11 @@ def _ingest_dataset(request: AddDatasetRequest) -> None:
         purpose = dataset_description.purpose
         domain = dataset_description.domain
 
-        metadata = {"dataset_id": dataset_id}
+        metadata = {
+            "dataset_id": dataset_id,
+            "official_description": official_description,
+            "profile_description": profile_description,
+        }
         if request.dataset_metadata:
             processed_metadata = {}
             for key, value in request.dataset_metadata.items():
@@ -187,10 +191,10 @@ def _ingest_dataset(request: AddDatasetRequest) -> None:
             metadatas=[metadata],
             ids=[dataset_id],
         )
+        app.logger.info(f"Dataset {dataset_id} ingested successfully")
 
     except Exception as exc:
         app.logger.exception("Dataset %s ingestion failed: %s", dataset_id, exc)
-
 
 @app.post("/add_dataset", status_code=status.HTTP_202_ACCEPTED)
 async def add_dataset(
@@ -904,6 +908,180 @@ async def search_datasets_expanded_streaming(request: SearchDatasetsRequest):
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
+
+@app.post("/search_datasets_explainable")
+def search_datasets_explainable(request: SearchDatasetsRequest):
+    """
+    Search for datasets in the ChromaDB database and return the complete dataset entries with explainability.
+
+    Args:
+        query: The query to search for.
+        n_results: The number of results to return.    
+
+    Returns:
+        A list of datasets, each containing the dataset ID, the distance, the official description, the profile description and the domain with explainability.
+    """
+
+    try:
+        candidate_dataset_description = (
+            app.state.candidate_dataset_description_chain.invoke(
+                {"query": request.query}
+            )
+        )
+        general_description = candidate_dataset_description.general_description
+        purpose = candidate_dataset_description.purpose
+        domain = candidate_dataset_description.domain
+
+        general_description_results = None
+        purpose_results = None
+        domain_results = None
+        general_description_results_dict = {}
+        purpose_results_dict = {}
+        domain_results_dict = {}
+        max_general_description_distance = 0
+        max_purpose_distance = 0
+        max_domain_distance = 0
+
+
+        if general_description:
+            general_description_results = app.state.description_collection.query(
+                query_texts=[general_description],
+                n_results=2 * request.n_results,
+            )
+            if general_description_results["ids"][0]:  # Check if results are not empty
+                general_description_results_dict = {
+                    k: v
+                    for k, v in zip(
+                        general_description_results["ids"][0],
+                        general_description_results["distances"][0],
+                    )
+                }
+                max_general_description_distance = max(
+                    general_description_results["distances"][0]
+                )
+
+        # Search for the purpose
+        if purpose:
+            purpose_results = app.state.use_case_collection.query(
+                query_texts=[purpose],
+                n_results=2 * request.n_results,
+            )
+            if purpose_results["ids"][0]:  # Check if results are not empty
+                purpose_results_dict = {
+                    k: v
+                    for k, v in zip(
+                        purpose_results["ids"][0], purpose_results["distances"][0]
+                    )
+                }
+                max_purpose_distance = max(purpose_results["distances"][0])
+
+        # Search for the domain
+        if domain:
+            domain_results = app.state.domain_collection.query(
+                query_texts=[domain], 
+                n_results=2 * request.n_results
+            )
+            if domain_results["ids"][0]:  # Check if results are not empty
+                domain_results_dict = {
+                    k: v
+                    for k, v in zip(
+                        domain_results["ids"][0], domain_results["distances"][0]
+                    )
+                }
+                max_domain_distance = max(domain_results["distances"][0])
+
+        candidate_datasets = (
+            general_description_results["ids"][0]
+            + purpose_results["ids"][0]
+            + domain_results["ids"][0]
+        )
+        candidate_datasets_distances = {k: 0 for k in candidate_datasets}
+        for dataset in candidate_datasets:
+            if general_description:
+                if dataset in general_description_results_dict:
+                    candidate_datasets_distances[
+                        dataset
+                    ] += general_description_results_dict[dataset]
+                else:
+                    candidate_datasets_distances[
+                        dataset
+                    ] += max_general_description_distance
+            if purpose:
+                if dataset in purpose_results_dict:
+                    candidate_datasets_distances[dataset] += purpose_results_dict[
+                        dataset
+                    ]
+                else:
+                    candidate_datasets_distances[dataset] += max_purpose_distance
+            if domain:
+                if dataset in domain_results_dict:
+                    candidate_datasets_distances[dataset] += domain_results_dict[
+                        dataset
+                    ]
+                else:
+                    candidate_datasets_distances[dataset] += max_domain_distance
+
+        # sort the candidate datasets by the distances
+        sorted_candidate_datasets_distances = sorted(
+            candidate_datasets_distances.items(), key=lambda x: x[1]
+        )
+
+        results = []
+
+        for dataset_id, _ in sorted_candidate_datasets_distances:
+            dataset_info = {
+                "dataset_description": app.state.description_collection.get(
+                    ids=[dataset_id]
+                )["documents"][0],
+                "use_case": app.state.use_case_collection.get(ids=[dataset_id])[
+                    "documents"
+                ][0],
+                "domain": app.state.domain_collection.get(ids=[dataset_id])[
+                    "documents"
+                ][0],
+                "dataset_official_description": app.state.description_collection.get(ids=[dataset_id])["metadatas"][0]["official_description"],
+                "dataset_title": app.state.description_collection.get(ids=[dataset_id])["metadatas"][0].get("title", ""),
+            }
+            results.append((dataset_id, dataset_info))
+
+        return {
+            "results": results[: request.n_results],
+            "query_analysis": {
+                "general_description": general_description,
+                "purpose": purpose,
+                "domain": domain,
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/get_all_datasets")
+def get_all_datasets():
+    """
+    Get all datasets from the ChromaDB database collections without any scope checks.
+    """
+    try:
+        # Get all datasets from the description collection
+        all_datasets = app.state.description_collection.get()
+        
+        results = []
+        
+        for i, dataset_id in enumerate(all_datasets["ids"]):
+            dataset_info = {
+                "dataset_id": dataset_id,
+                "dataset_description": all_datasets["documents"][i],
+                "use_case": app.state.use_case_collection.get(ids=[dataset_id])["documents"][0],
+                "domain": app.state.domain_collection.get(ids=[dataset_id])["documents"][0],
+                "metadata": all_datasets["metadatas"][i]
+            }
+            results.append(dataset_info)
+        
+        return {"results": results}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

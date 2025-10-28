@@ -91,3 +91,25 @@ The API supports multiple configuration options via environment variables:
 ## Usage
 
 The API is designed to be deployed as a containerized service. See the main project README for deployment instructions.
+
+## Installation 
+
+The whole installation process is carried out using `uv`, so make sure you have installed this first. 
+
+Simply create a new `venv` using the following command: 
+
+```
+uv venv 
+```
+
+Then, you can recreate the environment and the dependencies needed to run the code using: 
+
+```
+uv sync  
+```
+
+To start the FastAPI server simply run: 
+
+```
+uv run uvicorn src.server:app --reload
+```

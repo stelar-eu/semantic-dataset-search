@@ -1,18 +1,21 @@
 # Use Python 3.12.8 as base image
-FROM python:3.12.8-slim
+FROM python:3.13.7-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install required system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    python3-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
+# Install uv using pip
+RUN pip install uv
+
+# Verify uv installation
+RUN uv --version
 
 # Copy dependency files first to leverage Docker cache
 COPY pyproject.toml uv.lock ./

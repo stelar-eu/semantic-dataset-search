@@ -32,3 +32,5 @@ class SearchDatasetsRequest(BaseModel):
     n_results: int = 5
     auth_scope: List[str] = []
 
+class DatasetReranking(BaseModel):
+    reranked_indexes: List[int]

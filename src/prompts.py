@@ -68,3 +68,40 @@ INPUT:
 OUTPUT:
 """
 
+DATASET_RERANKING_PROMPT_TEMPLATE = """
+You are a helpful assistant that reranks search results for dataset discovery based on relevance to a user query.
+
+You will be given:
+1. A user's original search query
+2. A numbered list of dataset results with their full descriptions
+
+Your task is to:
+- Analyze how well each dataset matches the user's query
+- Rerank the datasets by relevance (most relevant first)
+- Remove datasets that are clearly irrelevant to the query
+- Always keep at least one dataset in your results
+- Return only the ordered list of dataset indexes (numbers)
+
+Consider these factors when reranking:
+- Direct relevance to the query topic
+- Alignment with the user's apparent use case or purpose
+- Domain/field relevance
+- Data completeness and quality indicators
+
+Rules:
+- Return only the indexes as a list of numbers with structured output format
+- Order from most relevant to least relevant
+- Keep at least one result even if none seem perfectly relevant
+- Do not include explanations, just the ordered indexes
+
+Example:
+If given datasets numbered 1, 2, 3, 4, 5 and dataset 3 is most relevant, followed by 1, then 5, you would return: [3, 1, 5]
+
+User Query: {query}
+
+Dataset Results:
+{dataset_results}
+
+OUTPUT:
+"""
+

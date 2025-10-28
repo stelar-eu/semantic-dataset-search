@@ -18,6 +18,7 @@ from .models import (
     AddDatasetRequest,
     DatasetDescription,
     DeleteDatasetRequest,
+    DatasetReranking,
     SearchDatasetsRequest,
     UpdateDatasetMetadataRequest,
     UpdateDatasetRequest,
@@ -25,8 +26,10 @@ from .models import (
 from .prompts import (
     CANDIDATE_DATASET_DESCRIPTION_INFERENCE_PROMPT_TEMPLATE,
     DATASET_DESCRIPTION_PROMPT_TEMPLATE,
+    DATASET_RERANKING_PROMPT_TEMPLATE,
 )
 from .utils import flatten_auth_scope
+from .processing import compose_dataset_description_for_reranking
 
 import logging
 
@@ -114,6 +117,14 @@ async def lifespan(app: FastAPI):
         | app.state.llm.with_structured_output(DatasetDescription)
     )
 
+    dataset_reranking_prompt = ChatPromptTemplate.from_template(
+        DATASET_RERANKING_PROMPT_TEMPLATE
+    )
+    app.state.dataset_reranking_chain = (
+        dataset_reranking_prompt
+        | app.state.llm.with_structured_output(DatasetReranking)
+    )
+
     try:
         # Yield control to the application
         yield
@@ -191,10 +202,10 @@ def _ingest_dataset(request: AddDatasetRequest) -> None:
             metadatas=[metadata],
             ids=[dataset_id],
         )
-        app.logger.info(f"Dataset {dataset_id} ingested successfully")
+        logger.info(f"Dataset {dataset_id} ingested successfully")
 
     except Exception as exc:
-        app.logger.exception("Dataset %s ingestion failed: %s", dataset_id, exc)
+        logger.exception("Dataset %s ingestion failed: %s", dataset_id, exc)
 
 @app.post("/add_dataset", status_code=status.HTTP_202_ACCEPTED)
 async def add_dataset(
@@ -1044,9 +1055,20 @@ def search_datasets_explainable(request: SearchDatasetsRequest):
                 "dataset_title": app.state.description_collection.get(ids=[dataset_id])["metadatas"][0].get("title", ""),
             }
             results.append((dataset_id, dataset_info))
+            logger.info(f"Results before reranking: {results}")
+        try:
+            combined_dataset_descriptions = [f"{i+1}. {compose_dataset_description_for_reranking(dataset_info)}" for i, (dataset_id, dataset_info) in enumerate(results)]
+            reranked_indexes = app.state.dataset_reranking_chain.invoke(
+                {"query": request.query, "dataset_results": combined_dataset_descriptions}
+            )
+            logger.info(f"Reranked indexes: {reranked_indexes.reranked_indexes}")
+            reranked_results = [results[i-1] for i in reranked_indexes.reranked_indexes]
+        except Exception as e:
+            logger.exception("Error reranking datasets: %s", e)
+            reranked_results = results
 
         return {
-            "results": results[: request.n_results],
+            "results": reranked_results[: request.n_results],
             "query_analysis": {
                 "general_description": general_description,
                 "purpose": purpose,
